@@ -1,0 +1,7 @@
+region,event,reference,min_spei12,month,percentile_rank
+Amazon,2005 Amazon drought,"Marengo et al. (2008), J. Climate 21",-1.6,2005-12,8.8
+Amazon,2010 Amazon drought,"Lewis et al. (2011), Science 331",-1.29,2010-12,15.2
+Amazon,2015-16 El Niño drought,"Jiménez-Muñoz et al. (2016), Sci. Rep. 6",-1.23,2016-05,16.6
+Amazon,2023 record drought,"Espinoza et al. (2024), Sci. Rep. 14",-1.89,2023-10,4.1
+Titicaca,"1982-83 El Niño, Altiplano","Garreaud & Aceituno (2001), J. Climate 14",-1.15,1983-09,9.7
+Titicaca,"1991-92 El Niño, Altiplano","Garreaud & Aceituno (2001), J. Climate 14",-1.88,1992-07,2.1

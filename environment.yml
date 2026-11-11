@@ -1,0 +1,16 @@
+name: peru-drought
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - xarray
+  - netcdf4
+  - xclim=0.61   # 1.0 moved xclim.indices; results were produced with 0.61
+  - scipy
+  - pandas
+  - pyarrow
+  - geopandas
+  - shapely>=2
+  - requests
+  - plotly
+  - pytest
