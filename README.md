@@ -37,7 +37,8 @@ Figures from [`outputs/basin_indicators.csv`](outputs/basin_indicators.csv) and 
 | 3 | Averages the grids over each unit (cell centres inside the unit, weighted by cos latitude) | `scripts/build_basin_series.py` |
 | 4 | SPEI-3 and SPEI-12 per unit (log-logistic distribution fitted per calendar month on 1991–2020 with xclim), drought frequency now and at +2 °C / +4 °C, trends, runoff change and priority basins | `scripts/compute_indicators.py` |
 | 5 | Checks SPEI against documented droughts | `scripts/validate_events.py` |
-| 6 | Builds the static dashboard in `docs/` | `scripts/build_dashboard.py` |
+| 6 | Downloads the Natural Earth coastline and borders used as the map frame | `scripts/download_natural_earth.py` |
+| 7 | Builds the static dashboard in `docs/` | `scripts/build_dashboard.py` |
 
 The future SPEI uses the distribution fitted to today's climate, so a value below −1.5 at +2 °C means "as dry as a severe drought of today's climate". Hydropower, aquaculture and fishing are not counted as consumptive use.
 
@@ -76,6 +77,7 @@ python scripts/download_ana.py
 python scripts/build_basin_series.py
 python scripts/compute_indicators.py      # about 15 min (one distribution fit per basin and month)
 python scripts/validate_events.py
+python scripts/download_natural_earth.py
 python scripts/build_dashboard.py
 ```
 
@@ -83,6 +85,7 @@ python scripts/build_dashboard.py
 
 - Abatzoglou, J. T., Hegewisch, K. C., Yin, C. and Kalashinkov, D. A. (2026). TerraClimate v1.1: an updated global climate and climatic water balance dataset with climate scenarios. *Scientific Data*. Licence CC0 1.0.
 - Autoridad Nacional del Agua (ANA): hydrographic units (via the national spatial data portal, IDEP) and water use rights (GeoSNIRH).
+- Natural Earth: 1:10m coastline and land borders (public domain).
 - Vicente-Serrano, S. M., Beguería, S. and López-Moreno, J. I. (2010). A multiscalar drought index sensitive to global warming: the Standardized Precipitation Evapotranspiration Index. *Journal of Climate* 23, 1696–1718.
 
 ## Author

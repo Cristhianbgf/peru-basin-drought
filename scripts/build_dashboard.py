@@ -4,6 +4,10 @@ It reads only files in outputs/, so every number on the page comes from the
 pipeline. A short script in the page switches the map indicator
 and the basin shown in the time series.
 
+The charts follow the look of matplotlib figures (black frame, outside ticks,
+dotted grid, bold titles, a map on longitude/latitude axes with coastline and
+dashed borders) while staying interactive.
+
 Usage:
     python scripts/build_dashboard.py
 """
@@ -14,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.colors import get_colorscale, sample_colorscale
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "outputs"
@@ -21,55 +26,80 @@ PAGE = ROOT / "docs" / "index.html"
 REPO = "https://github.com/Cristhianbgf/peru-basin-drought"
 PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 
-TEXT, TEXT2, GRID, AXIS, WHITE = "#222222", "#555555", "#e6e6e6", "#bbbbbb", "#ffffff"
+TEXT, WHITE = "#222222", "#ffffff"
+FONT = '"DejaVu Sans", Verdana, Arial, sans-serif'
 REGION = {"Pacífico": "Pacific", "Amazonas": "Amazon", "Titicaca": "Titicaca"}
-REGION_COLOR = {"Pacific": "#0072B2", "Amazon": "#009E73", "Titicaca": "#D55E00"}
+REGION_COLOR = {"Pacific": "#1f77b4", "Amazon": "#2ca02c", "Titicaca": "#ff7f0e"}
+WET, DRY, NODATA = "#4682b4", "#ff7f50", "#d9d9d9"
 CONFIG = {"displaylogo": False, "responsive": True,
           "modeBarButtonsToRemove": ["select2d", "lasso2d", "autoScale2d"]}
 
-# map indicator: (column, label, colour scale, zmin, zmax, unit)
+# map indicator: (column, button label, colour scale, zmin, zmax, colour bar title, map title)
 MAP = {
-    # +2 °C first: the map draws reliably only when the first trace starts visible
-    "freq_2": ("severe_drought_freq_plus2C", "Severe drought at +2 °C", "YlOrRd", 0, 50, "% of months"),
-    "freq_base": ("severe_drought_freq_baseline", "Severe drought, 1991-2020", "YlOrRd", 0, 50, "% of months"),
-    "freq_4": ("severe_drought_freq_plus4C", "Severe drought at +4 °C", "YlOrRd", 0, 50, "% of months"),
-    "runoff_2": ("runoff_change_pct_plus2C", "Runoff change at +2 °C", "RdBu", -30, 30, "%"),
-    "runoff_4": ("runoff_change_pct_plus4C", "Runoff change at +4 °C", "RdBu", -30, 30, "%"),
-    "use": ("log_use", "Licensed consumptive water use", "Blues", 0, 3.5, "log10 hm³/yr"),
+    "freq_2": ("severe_drought_freq_plus2C", "Severe drought at +2 °C", "YlOrRd", 0, 50,
+               "Months in severe drought (%)", "Severe drought frequency at +2 °C of global warming"),
+    "freq_base": ("severe_drought_freq_baseline", "Severe drought, 1991-2020", "YlOrRd", 0, 50,
+                  "Months in severe drought (%)", "Severe drought frequency, 1991–2020"),
+    "freq_4": ("severe_drought_freq_plus4C", "Severe drought at +4 °C", "YlOrRd", 0, 50,
+               "Months in severe drought (%)", "Severe drought frequency at +4 °C of global warming"),
+    "runoff_2": ("runoff_change_pct_plus2C", "Runoff change at +2 °C", "RdBu", -30, 30,
+                 "Runoff change (%)", "Change in mean runoff at +2 °C (vs 1991–2020)"),
+    "runoff_4": ("runoff_change_pct_plus4C", "Runoff change at +4 °C", "RdBu", -30, 30,
+                 "Runoff change (%)", "Change in mean runoff at +4 °C (vs 1991–2020)"),
+    "use": ("log_use", "Licensed consumptive water use", "Blues", 0, 3.5,
+            "log10 of hm³/yr", "Licensed consumptive water use"),
 }
 
 # the map opens on +2 °C: the 1991-2020 map is ~7 % everywhere by construction
 DEFAULT = "freq_2"
 
 
-def clockwise(geo):
-    """Plotly's vector maps (d3-geo) need outer rings clockwise and holes
-    counter-clockwise, the opposite of the GeoJSON standard. A ring in the
-    wrong direction is drawn as the whole globe minus the basin."""
-    def area(ring):  # shoelace: positive = counter-clockwise
-        return sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(ring, ring[1:]))
-
-    def fix(poly):
-        return [r if (area(r) < 0) == (k == 0) else r[::-1] for k, r in enumerate(poly)]
-
-    for f in geo["features"]:
-        g = f["geometry"]
-        if g["type"] == "Polygon":
-            g["coordinates"] = fix(g["coordinates"])
-        elif g["type"] == "MultiPolygon":
-            g["coordinates"] = [fix(p) for p in g["coordinates"]]
-    return geo
-
-
-def layout(height, **extra):
-    d = dict(height=height, paper_bgcolor=WHITE, plot_bgcolor=WHITE,
-             font=dict(family='system-ui, -apple-system, "Segoe UI", sans-serif', size=13, color=TEXT),
-             margin=dict(l=12, r=12, t=12, b=12),
-             hoverlabel=dict(bgcolor=WHITE, bordercolor=AXIS, font=dict(color=TEXT, size=12)),
-             xaxis=dict(gridcolor=GRID, linecolor=AXIS, zeroline=False),
-             yaxis=dict(gridcolor=GRID, linecolor=AXIS, zeroline=False))
+def axis(**extra):
+    d = dict(showline=True, linecolor="black", linewidth=1, mirror=True, ticks="outside",
+             ticklen=4, tickcolor="black", showgrid=True, gridcolor="#d9d9d9", griddash="dot",
+             zeroline=False, title_font=dict(size=13))
     d.update(extra)
     return d
+
+
+def layout(height, title, **extra):
+    d = dict(height=height, paper_bgcolor=WHITE, plot_bgcolor=WHITE,
+             font=dict(family=FONT, size=12, color="black"),
+             title=dict(text=f"<b>{title}</b>", x=0.5, xanchor="center", font=dict(size=15)),
+             margin=dict(l=70, r=20, t=50, b=55),
+             hoverlabel=dict(bgcolor=WHITE, bordercolor="black", font=dict(family=FONT, color=TEXT, size=12)),
+             xaxis=axis(), yaxis=axis())
+    d.update(extra)
+    return d
+
+
+def text_box(text, x, y):
+    """Text in a white box with a thin black edge, bottom-left corner at (x, y) of the axes."""
+    return dict(text=text, xref="x domain", yref="y domain", x=x, y=y, xanchor="left", yanchor="bottom",
+                showarrow=False, bgcolor=WHITE, bordercolor="black", borderwidth=1, borderpad=4,
+                font=dict(size=11))
+
+
+def polygon_xy(geom):
+    polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+    xs, ys = [], []
+    for poly in polys:
+        for ring in poly:
+            xs += [round(p[0], 3) for p in ring] + [None]
+            ys += [round(p[1], 3) for p in ring] + [None]
+    return xs, ys
+
+
+def lines_xy(geo, kind):
+    xs, ys = [], []
+    for f in geo["features"]:
+        if f["properties"]["kind"] != kind:
+            continue
+        g = f["geometry"]
+        for line in ([g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]):
+            xs += [round(p[0], 3) for p in line] + [None]
+            ys += [round(p[1], 3) for p in line] + [None]
+    return xs, ys
 
 
 def main():
@@ -79,65 +109,122 @@ def main():
         if c.startswith("severe_drought_freq"):
             ind[c] = 100 * ind[c]
     ind["log_use"] = np.log10(ind.consumptive_use_hm3.clip(lower=1))
-    geo = clockwise(json.loads((OUT / "basins_web.geojson").read_text(encoding="utf-8")))
+    geo = json.loads((OUT / "basins_web.geojson").read_text(encoding="utf-8"))
+    ne = json.loads((OUT / "natural_earth_lines.geojson").read_text(encoding="utf-8"))
     spei = pd.read_parquet(OUT / "basin_spei_monthly.parquet")
     val = pd.read_csv(OUT / "validation_events.csv")
     order = ind.sort_values("unit_name").unit_code.tolist()
     name = ind.set_index("unit_code").unit_name
+    ok = ~ind.hyper_arid.astype(bool)
 
-    # ---- map: one trace per indicator, toggled from the page
-    fig = go.Figure()
-    for i, (key, (col, label, scale, zmin, zmax, unit)) in enumerate(MAP.items()):
-        hover = ("<b>%{customdata[0]}</b><br>" + label + ": %{customdata[1]}<br>"
-                 "Region: %{customdata[2]}<extra></extra>")
-        shown = ind[col].round(1).astype(str).replace("nan", "n/a (too little runoff)")
+    # ---- map on longitude/latitude axes with equal aspect (as a plate carrée map):
+    # one filled polygon per basin, recoloured by the page for each indicator
+    by_code = ind.set_index("unit_code")
+    codes = [str(f["properties"]["unit_code"]) for f in geo["features"]]
+    n_basins = len(codes)
+    states = {}
+    for key, (col, label, scale, zmin, zmax, unit, title) in MAP.items():
+        v = by_code.loc[codes, col]
+        frac = ((v.fillna(zmin) - zmin) / (zmax - zmin)).clip(0, 1).tolist()
+        fill = [NODATA if pd.isna(x) else c for x, c in zip(v, sample_colorscale(get_colorscale(scale), frac))]
         if key == "use":
-            shown = ind.consumptive_use_hm3.round(1).astype(str) + " hm³/yr"
-        fig.add_trace(go.Choropleth(
-            geojson=geo, featureidkey="properties.unit_code", locations=ind.unit_code,
-            z=ind[col], colorscale=scale, zmin=zmin, zmax=zmax,
-            marker=dict(line=dict(width=0.4, color="#ffffff")),
-            customdata=np.stack([ind.unit_name, shown, ind.region], axis=1),
-            hovertemplate=hover, visible=(key == DEFAULT),
-            colorbar=dict(title=dict(text=unit, font=dict(color=TEXT2)), thickness=12, len=0.6)))
-    # vector map without web tiles: it draws at once and also works offline
-    fig.update_geos(fitbounds="locations", visible=False, projection_type="mercator",
-                    showcountries=True, countrycolor="#cccccc", showland=True, landcolor="#f2f2f2",
-                    showocean=True, oceancolor="#e8eef3")
-    fig.update_layout(**layout(620))
-    map_visible = {k: [j == i for j in range(len(MAP))] for i, k in enumerate(MAP)}
+            shown = by_code.loc[codes, "consumptive_use_hm3"].map(lambda x: f"{x:,.1f} hm³/yr")
+            box = f"Total licensed: {ind.consumptive_use_hm3.sum() / 1000:,.1f} km³/yr"
+        elif key.startswith("freq"):
+            shown = v.map(lambda x: f"{x:.1f} % of months")
+            box = f"Median: {ind.loc[ok, col].median():.1f} % of months"
+        else:
+            shown = v.map(lambda x: "n/a (too little runoff)" if pd.isna(x) else f"{x:+.1f} %")
+            box = f"Median: {ind[col].median():+.1f} %"
+        text = [f"<b>{html.escape(by_code.at[c, 'unit_name'])}</b><br>{label}: {s}"
+                f"<br>Region: {by_code.at[c, 'region']}" for c, s in zip(codes, shown)]
+        # explicit scale: plotly.js orders some named scales the other way round
+        states[key] = {"fill": fill, "text": text, "scale": get_colorscale(scale), "zmin": zmin, "zmax": zmax,
+                       "unit": unit, "title": f"<b>{title}</b>", "box": box}
+
+    s0 = states[DEFAULT]
+    fig = go.Figure()
+    for i, f in enumerate(geo["features"]):
+        xs, ys = polygon_xy(f["geometry"])
+        fig.add_trace(go.Scatter(x=xs, y=ys, fill="toself", fillcolor=s0["fill"][i], mode="lines",
+                                 line=dict(color=WHITE, width=0.5), hoveron="fills", hoverinfo="text",
+                                 text=s0["text"][i], showlegend=False))
+    for kind, style in {"coast": dict(color="black", width=1),
+                        "border": dict(color="black", width=0.8, dash="dash")}.items():
+        xs, ys = lines_xy(ne, kind)
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=style, hoverinfo="skip", showlegend=False))
+    # colour bar carried by an empty marker trace
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None], mode="markers", hoverinfo="skip", showlegend=False,
+        marker=dict(colorscale=s0["scale"], cmin=s0["zmin"], cmax=s0["zmax"], color=[s0["zmin"]], showscale=True,
+                    colorbar=dict(x=0.72, xanchor="left", thickness=16, len=0.8, outlinecolor="black", outlinewidth=1, ticks="outside",
+                                  tickcolor="black", title=dict(text=s0["unit"], side="right")))))
+    lon_ticks = list(range(-80, -67, 2))
+    lat_ticks = [x / 2 for x in range(-35, 1, 5)]
+    fig.update_layout(**layout(
+        720, MAP[DEFAULT][6], margin=dict(l=70, r=20, t=50, b=40),
+        xaxis=axis(range=[-81.6, -68.4], tickvals=lon_ticks, ticktext=[f"{-v:g}°W" for v in lon_ticks],
+                   domain=[0.0, 0.7], constrain="domain", constraintoward="right"),
+        yaxis=axis(range=[-18.6, 0.3], tickvals=lat_ticks, scaleanchor="x", scaleratio=1, constrain="domain",
+                   ticktext=["0°" if v == 0 else f"{-v:g}°S" for v in lat_ticks]),
+        annotations=[text_box(s0["box"], 0.02, 0.02)]))
 
     # ---- priority matrix
     mat = go.Figure()
-    for r, g in ind[~ind.hyper_arid].groupby("region"):
+    for r, g in ind[ok].groupby("region"):
         mat.add_trace(go.Scatter(
             x=g.consumptive_use_hm3.clip(lower=0.1), y=g.severe_drought_freq_plus2C, mode="markers",
             name=r, marker=dict(color=REGION_COLOR[r], size=8 + 18 * np.sqrt(g.use_mining_hm3 / max(ind.use_mining_hm3.max(), 1)),
-                                line=dict(width=g.priority.map({True: 2, False: 0.5}), color=TEXT), opacity=0.8),
+                                line=dict(width=g.priority.map({True: 2, False: 0.5}), color="black"), opacity=0.8),
             customdata=np.stack([g.unit_name, g.severe_drought_freq_baseline.round(1),
                                  g.use_mining_hm3.round(1)], axis=1),
             hovertemplate=("<b>%{customdata[0]}</b><br>Consumptive use: %{x:.1f} hm³/yr"
                            "<br>Severe drought at +2 °C: %{y:.1f} % (today %{customdata[1]} %)"
                            "<br>Mining: %{customdata[2]} hm³/yr<extra></extra>")))
     q = ind.consumptive_use_hm3.quantile(2 / 3)
-    mat.add_vline(x=q, line=dict(color=AXIS, dash="dash"))
-    mat.update_layout(**layout(460), legend=dict(orientation="h", y=-0.15))
-    mat.update_xaxes(type="log", title=dict(text="Licensed consumptive water use (hm³/yr, log scale)", font=dict(color=TEXT2)))
-    mat.update_yaxes(title=dict(text="Months in severe drought at +2 °C (%)", font=dict(color=TEXT2)), rangemode="tozero")
+    mat.add_vline(x=q, line=dict(color="black", dash="dash", width=1))
+    mat.update_layout(**layout(480, "Licensed water demand vs severe drought at +2 °C"),
+                      legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top", bgcolor=WHITE,
+                                  bordercolor="#cccccc", borderwidth=1))
+    mat.update_xaxes(type="log", title_text="Licensed consumptive water use (hm³/yr, log scale)")
+    mat.update_yaxes(title_text="Months in severe drought at +2 °C (%)", rangemode="tozero")
 
     # ---- SPEI-12 series for one basin at a time
-    # one bar trace; the page swaps its values when another basin is chosen
+    # one bar trace; the page swaps its values, the trend line and the title
     wide = (spei.pivot(index="time", columns="unit_code", values="spei12")
             .loc["1959-01-01":].round(2))
+    years = np.round(wide.index.year + (wide.index.month - 0.5) / 12, 3)
+    x0, x1 = float(years.min()), float(years.max())
+
+    def trend(y):
+        m = y.notna().to_numpy()
+        a, b = np.polyfit(years[m], y.to_numpy()[m], 1)
+        return [round(a * x0 + b, 3), round(a * x1 + b, 3)], f"Trend: {10 * a:+.2f} SPEI/decade"
+
+    def series_title(u):
+        return f"<b>SPEI-12 — {html.escape(name[u])} (ref. 1991–2020)</b>"
+
     first = wide[order[0]]
-    ser = go.Figure(go.Bar(x=wide.index, y=first, marker_line_width=0,
-                           marker_color=np.where(first < 0, "#D55E00", "#0072B2"),
-                           hovertemplate="%{x|%b %Y}<br>SPEI-12: %{y}<extra></extra>"))
-    for v in (-1.5, 1.5):
-        ser.add_hline(y=v, line=dict(color=TEXT2, dash="dot", width=1))
-    ser.update_layout(**layout(380), showlegend=False, bargap=0)
-    ser.update_yaxes(title=dict(text="SPEI-12", font=dict(color=TEXT2)), range=[-3.2, 3.2])
-    serie_values = {u: [None if pd.isna(v) else float(v) for v in wide[u]] for u in order}
+    t0, label0 = trend(first)
+    ser = go.Figure()
+    ser.add_trace(go.Bar(x=list(years), y=first, width=1 / 12, marker_line_width=0, showlegend=False,
+                         marker_color=np.where(first < 0, DRY, WET), customdata=wide.index.strftime("%b %Y"),
+                         hovertemplate="%{customdata}<br>SPEI-12: %{y}<extra></extra>"))
+    ser.add_trace(go.Scatter(x=[x0, x1], y=[-1.5, -1.5], mode="lines", hoverinfo="skip",
+                             line=dict(color="black", dash="dot", width=1), name="Severe drought (−1.5)"))
+    ser.add_trace(go.Scatter(x=[x0, x1], y=t0, mode="lines", hoverinfo="skip",
+                             line=dict(color="black", dash="dash", width=1.5), name=label0))
+    ser.add_hline(y=0, line=dict(color="black", width=1))
+    ser.update_layout(**layout(420, ""), bargap=0,
+                      legend=dict(x=0.01, y=0.99, xanchor="left", yanchor="top", bgcolor=WHITE, borderwidth=0))
+    ser.update_layout(title_text=series_title(order[0]))
+    ser.update_xaxes(title_text="Year", range=[x0 - 0.5, x1 + 0.5], tickvals=list(range(1960, 2026, 5)))
+    ser.update_yaxes(title_text="SPEI-12", range=[-3.2, 3.2])
+    serie_values = {}
+    for u in order:
+        tr, lab = trend(wide[u])
+        serie_values[u] = {"y": [None if pd.isna(v) else float(v) for v in wide[u]],
+                           "t": tr, "s": lab, "title": series_title(u)}
 
     blocks = {k: f.to_html(full_html=False, include_plotlyjs=False, div_id=f"fig-{k}", config=CONFIG)
               for k, f in {"map": fig, "matrix": mat, "series": ser}.items()}
@@ -153,7 +240,6 @@ def main():
         f'<td class="num">{r.min_spei12:.2f}</td><td>{r.month}</td><td class="num">{r.percentile_rank:.0f}</td></tr>'
         for r in val.itertuples())
 
-    ok = ~ind.hyper_arid
     cards = [
         ("Basins", f"{len(ind)}", "ANA hydrographic units covering Peru"),
         ("Severe drought today", f"{ind.loc[ok, 'severe_drought_freq_baseline'].median():.1f} %",
@@ -168,10 +254,10 @@ def main():
     buttons = "".join(f'<button data-k="{k}" aria-pressed="{str(k == DEFAULT).lower()}">{v[1]}</button>'
                       for k, v in MAP.items())
     options = "".join(f'<option value="{u}">{html.escape(name[u])}</option>' for u in order)
-    data_js = json.dumps({"map": map_visible, "series": serie_values}, separators=(",", ":"))
+    data_js = json.dumps({"map": states, "n": n_basins, "series": serie_values}, separators=(",", ":"))
 
     page = TEMPLATE.format(plotly=PLOTLY_CDN, repo=REPO, cards=cards_html, buttons=buttons,
-                           options=options, priority_rows=rows, validation_rows=val_rows,
+                           options=options, priority_rows=rows, validation_rows=val_rows, dry=DRY, wet=WET,
                            data_js=data_js, q=f"{q:,.0f}", **{f"fig_{k}": v for k, v in blocks.items()})
     PAGE.parent.mkdir(exist_ok=True)
     PAGE.write_text(page, encoding="utf-8")
@@ -236,7 +322,8 @@ Drought is measured with SPEI, which counts both rainfall and the evaporative de
   <div class="buttons" id="indicator">{buttons}</div>
   <p class="note">Severe drought: SPEI-12 at or below −1.5. Future SPEI uses the distribution fitted to
   1991-2020, so it reads as "as dry as a severe drought of today's climate". Runoff change is not shown
-  for basins with under 20 mm of runoff per year.</p>
+  (grey) for basins with under 20 mm of runoff per year. Medians of drought frequency leave out hyper-arid
+  coastal units.</p>
   {fig_map}
 </div>
 
@@ -279,7 +366,8 @@ Drought is measured with SPEI, which counts both rainfall and the evaporative de
   <p>Climate: TerraClimate v1.1 (Abatzoglou et al., 2026; CC0), monthly at about 4 km, 1958-2025, and its
   +2 °C and +4 °C pseudo-warming versions. Evaporative demand is Penman-Monteith reference evapotranspiration.
   Basins and water rights: National Water Authority (ANA): 231 hydrographic units and the water use rights in
-  force, summed per basin and sector. Hydropower, aquaculture and fishing are not counted as consumptive.</p>
+  force, summed per basin and sector. Hydropower, aquaculture and fishing are not counted as consumptive.
+  Coastline and borders: Natural Earth (public domain).</p>
   <p>SPEI follows Vicente-Serrano et al. (2010) with a log-logistic distribution fitted per basin and calendar
   month on 1991-2020 (xclim).</p>
   <h2>Limitations</h2>
@@ -290,17 +378,22 @@ Drought is measured with SPEI, which counts both rainfall and the evaporative de
 </section>
 
 <footer>Cristhian B. Gamarra Fuentes · <a href="{repo}">code on GitHub</a> ·
-contains data from TerraClimate (CC0) and Peru's National Water Authority (ANA).</footer>
+contains data from TerraClimate (CC0), Peru's National Water Authority (ANA) and Natural Earth.</footer>
 </main>
 <script>
 const DATA = {data_js};
+const BASINS = [...Array(DATA.n).keys()];
 document.querySelectorAll("#indicator button").forEach(b => b.addEventListener("click", () => {{
   document.querySelectorAll("#indicator button").forEach(x => x.setAttribute("aria-pressed", x === b));
-  Plotly.restyle("fig-map", {{visible: DATA.map[b.dataset.k]}});
+  const m = DATA.map[b.dataset.k];
+  Plotly.restyle("fig-map", {{fillcolor: m.fill, text: m.text}}, BASINS);
+  Plotly.update("fig-map", {{"marker.colorscale": [m.scale], "marker.cmin": [m.zmin], "marker.cmax": [m.zmax],
+    "marker.colorbar.title.text": [m.unit]}}, {{"title.text": m.title, "annotations[0].text": m.box}}, [DATA.n + 2]);
 }}));
 document.getElementById("unit").addEventListener("change", ev => {{
-  const y = DATA.series[ev.target.value];
-  Plotly.restyle("fig-series", {{y: [y], "marker.color": [y.map(v => v < 0 ? "#D55E00" : "#0072B2")]}});
+  const s = DATA.series[ev.target.value];
+  Plotly.restyle("fig-series", {{y: [s.y], "marker.color": [s.y.map(v => v < 0 ? "{dry}" : "{wet}")]}}, [0]);
+  Plotly.update("fig-series", {{y: [s.t], name: [s.s]}}, {{"title.text": s.title}}, [2]);
 }});
 </script>
 </body>
