@@ -25,6 +25,8 @@ OUT = ROOT / "outputs"
 PAGE = ROOT / "docs" / "index.html"
 REPO = "https://github.com/Cristhianbgf/peru-basin-drought"
 PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
+# Subresource Integrity hash of that exact file; the browser refuses it if the CDN copy changes
+PLOTLY_SRI = "sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7"
 
 TEXT, WHITE = "#222222", "#ffffff"
 FONT = '"DejaVu Sans", Verdana, Arial, sans-serif'
@@ -256,7 +258,7 @@ def main():
     options = "".join(f'<option value="{u}">{html.escape(name[u])}</option>' for u in order)
     data_js = json.dumps({"map": states, "n": n_basins, "series": serie_values}, separators=(",", ":"))
 
-    page = TEMPLATE.format(plotly=PLOTLY_CDN, repo=REPO, cards=cards_html, buttons=buttons,
+    page = TEMPLATE.format(plotly=PLOTLY_CDN, plotly_sri=PLOTLY_SRI, repo=REPO, cards=cards_html, buttons=buttons,
                            options=options, priority_rows=rows, validation_rows=val_rows, dry=DRY, wet=WET,
                            data_js=data_js, q=f"{q:,.0f}", **{f"fig_{k}": v for k, v in blocks.items()})
     PAGE.parent.mkdir(exist_ok=True)
@@ -271,7 +273,7 @@ TEMPLATE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Drought and water demand in Peru's river basins</title>
 <meta name="description" content="SPEI drought hazard for Peru's 231 hydrographic units, its change at +2 °C and +4 °C of global warming, and licensed water use by sector.">
-<script src="{plotly}" charset="utf-8"></script>
+<script src="{plotly}" integrity="{plotly_sri}" crossorigin="anonymous" charset="utf-8"></script>
 <style>
 :root {{ color-scheme: light; --bg: #f5f5f5; --panel: #ffffff; --text: #222222; --text2: #555555;
   --line: #e6e6e6; --border: #dddddd; --link: #0072B2; }}
